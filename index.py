@@ -8,30 +8,56 @@ from dotenv import load_dotenv
 import pandas as pd
 import time
 import os
+import logging
 
-# Carrega variáveis do .env
+# Configure logging
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s [%(levelname)s] %(message)s"
+)
+
+# Load environment variables from .env file
 load_dotenv()
 
-# Variáveis de ambiente
+# Environment variables
 CHROMEDRIVER_PATH = os.path.join(os.getcwd(), "chromedriver.exe")
 EXCEL_FILE = os.getenv("EXCEL_FILE")
 LOGIN_URL = os.getenv("LOGIN_URL")
 USERNAME = os.getenv("USER")
 PASSWORD = os.getenv("PASS")
 WAIT_TIMEOUT = 10
-print(USERNAME, PASSWORD, LOGIN_URL, EXCEL_FILE, CHROMEDRIVER_PATH)
+
+logging.info(f"Loaded environment variables: USERNAME={USERNAME}, LOGIN_URL={LOGIN_URL}, EXCEL_FILE={EXCEL_FILE}, CHROMEDRIVER_PATH={CHROMEDRIVER_PATH}")
+
 def read_questions_from_excel(file_path):
-    df = pd.read_excel(file_path, skiprows=2)
-    df.columns = ['risk_color', 'weight', 'range', 'question']
-    return df
+    """
+    Reads questions from an Excel file, skipping the first two rows.
+    Returns a DataFrame with standardized column names.
+    """
+    try:
+        df = pd.read_excel(file_path, skiprows=2)
+        df.columns = ['risk_color', 'weight', 'range', 'question']
+        logging.info(f"Loaded {len(df)} questions from Excel.")
+        return df
+    except Exception as e:
+        logging.error(f"Failed to read Excel file: {e}")
+        raise
 
 def setup_driver(chromedriver_path):
+    """
+    Sets up and returns a Selenium Chrome WebDriver.
+    """
     service = Service(executable_path=chromedriver_path)
     driver = webdriver.Chrome(service=service)
     driver.maximize_window()
+    logging.info("WebDriver initialized and window maximized.")
     return driver
 
 def login(driver, wait, username, password):
+    """
+    Logs into the web application using provided credentials.
+    """
+    logging.info("Navigating to login page.")
     driver.get(LOGIN_URL)
     username_input = wait.until(EC.presence_of_element_located((
         By.XPATH, "//label[contains(text(), 'Usuário')]/following-sibling::div//input"
@@ -47,29 +73,43 @@ def login(driver, wait, username, password):
         By.XPATH, "//button[contains(text(), 'LOGIN')]"
     )))
     login_button.click()
+    logging.info("Login submitted.")
 
 def create_form(driver, wait):
+    """
+    Clicks the button to create a new form.
+    """
     create_form_button = wait.until(EC.element_to_be_clickable((
         By.XPATH, "//button[contains(text(), 'Criar Formulário')]"
     )))
     create_form_button.click()
+    logging.info("Clicked 'Create Form' button.")
 
-def click_botao_por_texto(driver, texto):
-    botoes = driver.find_elements(By.TAG_NAME, "button")
-    for botao in botoes:
-        if texto in botao.get_attribute("textContent"):
+def click_button_by_text(driver, text):
+    """
+    Clicks a button containing the specified text.
+    Returns True if successful, False otherwise.
+    """
+    buttons = driver.find_elements(By.TAG_NAME, "button")
+    for button in buttons:
+        if text in button.get_attribute("textContent"):
             try:
-                driver.execute_script("arguments[0].scrollIntoView({block: 'center'});", botao)
+                driver.execute_script("arguments[0].scrollIntoView({block: 'center'});", button)
                 time.sleep(0.3)
-                botao.click()
+                button.click()
+                logging.info(f"Clicked button with text '{text}'.")
                 return True
             except Exception as e:
-                print(f"⚠️ Erro ao clicar no botão '{texto}': {e}")
+                logging.warning(f"Error clicking button '{text}': {e}")
                 return False
-    print(f"❌ Botão com texto '{texto}' não encontrado.")
+    logging.warning(f"Button with text '{text}' not found.")
     return False
 
-def fill_and_add_question(driver, wait, question, weight, primeira_pergunta):
+def fill_and_add_question(driver, wait, question, weight, is_first_question):
+    """
+    Fills in the question form and adds the question to the form.
+    Handles alternatives for the first question.
+    """
     question_input = wait.until(EC.presence_of_element_located((
         By.XPATH, "//label[contains(text(), 'Pergunta')]/following-sibling::div//input"
     )))
@@ -89,66 +129,77 @@ def fill_and_add_question(driver, wait, question, weight, primeira_pergunta):
     )
     observation_input.clear()
 
-    if primeira_pergunta:
+    if is_first_question:
+        # Add two alternatives for the first question
         for _ in range(2):
-            if not click_botao_por_texto(driver, "Adicionar Alternativa"):
-                print("❌ Não foi possível clicar no botão 'Adicionar Alternativa'")
+            if not click_button_by_text(driver, "Adicionar Alternativa"):
+                logging.error("Could not click 'Add Alternative' button.")
                 return
             wait.until(EC.presence_of_element_located((
                 By.XPATH, "//label[contains(text(), 'Texto da Alternativa')]/following-sibling::div//input"
             )))
         time.sleep(0.4)
 
-    alternativas = driver.find_elements(By.XPATH, "//label[contains(text(), 'Texto da Alternativa')]/following-sibling::div//input")
-    pesos = driver.find_elements(By.XPATH, "//label[contains(text(), 'Peso')]/following-sibling::div//input")
+    alternatives = driver.find_elements(By.XPATH, "//label[contains(text(), 'Texto da Alternativa')]/following-sibling::div//input")
+    weights = driver.find_elements(By.XPATH, "//label[contains(text(), 'Peso')]/following-sibling::div//input")
 
-    if len(alternativas) < 2 or len(pesos) < 2:
-        print("❌ Menos de duas alternativas disponíveis")
+    if len(alternatives) < 2 or len(weights) < 2:
+        logging.error("Less than two alternatives available.")
         return
 
-    alternativas[-2].send_keys(Keys.CONTROL + "a", Keys.DELETE)
-    alternativas[-2].send_keys("Sim")
-    pesos[-2].send_keys(Keys.CONTROL + "a", Keys.DELETE)
-    pesos[-2].send_keys("100")
+    # Fill alternatives: "Yes" and "No"
+    alternatives[-2].send_keys(Keys.CONTROL + "a", Keys.DELETE)
+    alternatives[-2].send_keys("Sim")
+    weights[-2].send_keys(Keys.CONTROL + "a", Keys.DELETE)
+    weights[-2].send_keys("100")
 
-    alternativas[-1].send_keys(Keys.CONTROL + "a", Keys.DELETE)
-    alternativas[-1].send_keys("Não")
-    pesos[-1].send_keys(Keys.CONTROL + "a", Keys.DELETE)
-    pesos[-1].send_keys("0")
+    alternatives[-1].send_keys(Keys.CONTROL + "a", Keys.DELETE)
+    alternatives[-1].send_keys("Não")
+    weights[-1].send_keys(Keys.CONTROL + "a", Keys.DELETE)
+    weights[-1].send_keys("0")
 
-    if not click_botao_por_texto(driver, "Adicionar Pergunta"):
-        print("❌ Não foi possível clicar no botão 'Adicionar Pergunta'")
+    if not click_button_by_text(driver, "Adicionar Pergunta"):
+        logging.error("Could not click 'Add Question' button.")
         return
 
 def main():
-    df = read_questions_from_excel(EXCEL_FILE)
-    driver = setup_driver(CHROMEDRIVER_PATH)
-    wait = WebDriverWait(driver, WAIT_TIMEOUT)
-    primeira_pergunta = True
-
+    """
+    Main execution function.
+    Reads questions, logs in, creates form, and adds questions.
+    """
     try:
-        login(driver, wait, USERNAME, PASSWORD)
-        create_form(driver, wait)
+        df = read_questions_from_excel(EXCEL_FILE)
+        driver = setup_driver(CHROMEDRIVER_PATH)
+        wait = WebDriverWait(driver, WAIT_TIMEOUT)
+        is_first_question = True
 
-        for _, row in df.iterrows():
-            question = row['question']
-            peso = 0
-            raw_peso = row['weight']
-            if pd.notna(raw_peso):
-                try:
-                    peso = int(str(raw_peso).strip().replace('%', '').replace(',', '').strip())
-                except ValueError:
-                    print(f"⚠️ Peso inválido: {raw_peso} — pergunta pulada.")
-                    continue
+        try:
+            login(driver, wait, USERNAME, PASSWORD)
+            create_form(driver, wait)
 
-            fill_and_add_question(driver, wait, question, peso, primeira_pergunta)
-            primeira_pergunta = False
-            print(f"✅ Pergunta adicionada: {question[:60]}...")
-            time.sleep(1.2)
+            for _, row in df.iterrows():
+                question = row['question']
+                weight = 0
+                raw_weight = row['weight']
+                if pd.notna(raw_weight):
+                    try:
+                        weight = int(str(raw_weight).strip().replace('%', '').replace(',', '').strip())
+                    except ValueError:
+                        logging.warning(f"Invalid weight: {raw_weight} — question skipped.")
+                        continue
 
-    finally:
-        time.sleep(2)
-        driver.quit()
+                fill_and_add_question(driver, wait, question, weight, is_first_question)
+                is_first_question = False
+                logging.info(f"Question added: {question[:60]}...")
+                time.sleep(1.2)
+
+        finally:
+            time.sleep(2)
+            driver.quit()
+            logging.info("WebDriver closed.")
+
+    except Exception as e:
+        logging.error(f"Fatal error: {e}")
 
 if __name__ == "__main__":
     main()
