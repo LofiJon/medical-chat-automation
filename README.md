@@ -19,12 +19,10 @@ Este projeto automatiza o preenchimento de um formulário web de perguntas com S
 
 ```bash
 pip install -r requirements.txt
-`` 
+```
 
 ## 🚀 Execução
  
-
 ```bash
 python index.py
-``
-
+```
