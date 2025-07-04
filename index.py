@@ -91,15 +91,66 @@ def fill_form(driver, wait, questions):
         print(f"✅ Question added: {question[:60]}...")
 
 def fill_by_index(driver, wait, index, value):
-    """Fill input field by its index."""
+    """
+    Fill input field by its index, ensuring the value is set correctly.
+    Args:
+        driver: Selenium WebDriver instance.
+        wait: WebDriverWait instance.
+        index: Index of the input field to fill.
+        value: Value to input.
+    Raises:
+        Exception: If the field with the given index is not found.
+    """
     print(f"📝 Filling field #{index} with value: '{value}'")
-    fields = wait.until(EC.presence_of_all_elements_located(
-        (By.XPATH, "//input[@type='text' or @type='number']")))
+    try:
+        fields = wait.until(EC.presence_of_all_elements_located(
+            (By.XPATH, "//input[@type='text' or @type='number']")))
+    except Exception as e:
+        raise Exception(f"⚠️ Unable to locate input fields: {e}")
+
     if index >= len(fields):
         raise Exception(f"⚠️ Field with index {index} not found.")
+
     field = fields[index]
-    field.clear()
-    field.send_keys(value)
+    scroll_into_view(driver, field)
+
+    # Try clicking the field with retries
+    for attempt in range(3):
+        try:
+            field.click()
+            break
+        except Exception:
+            print(f"⚠️ Attempt {attempt+1}: click failed. Retrying...")
+            time.sleep(0.4)
+            scroll_into_view(driver, field)
+    else:
+        raise Exception(f"⚠️ Could not click field #{index} after retries.")
+
+    # Clear and type the value robustly
+    driver.execute_script("arguments[0].value = '';", field)
+    time.sleep(0.2)
+    field.send_keys(Keys.CONTROL, 'a')
+    field.send_keys(Keys.DELETE)
+    time.sleep(0.1)
+    field.send_keys(str(value))
+    time.sleep(0.3)
+
+    # Confirm the value is set, retry if necessary
+    for _ in range(3):
+        if field.get_attribute("value").strip() == str(value):
+            return
+        print("🔁 Correcting value in the field, value not confirmed...")
+        driver.execute_script("arguments[0].value = '';", field)
+        field.send_keys(str(value))
+        time.sleep(0.3)
+
+    final_val = field.get_attribute("value").strip()
+    if final_val != str(value):
+        print(f"⚠️ Final value in field #{index} is '{final_val}', expected: '{value}'")
+
+def scroll_into_view(driver, element):
+    driver.execute_script("arguments[0].scrollIntoView({behavior: 'smooth', block: 'center'});", element)
+    time.sleep(0.3)
 
 def click_button_by_text(driver, text):
     """Click a button by its visible text."""
@@ -115,11 +166,32 @@ def click_button_by_text(driver, text):
         return False
 
 def clear_and_type(field, value):
-    """Clear the field and type the new value."""
+    """Força a limpeza com JS + digitação robusta."""
+    driver = field.parent  # pega o WebDriver do elemento
+    driver.execute_script("arguments[0].value = '';", field)
+    time.sleep(0.2)
+
     field.click()
-    field.send_keys(Keys.CONTROL, "a")
+    field.send_keys(Keys.CONTROL, 'a')
     field.send_keys(Keys.DELETE)
+    time.sleep(0.2)
     field.send_keys(str(value))
+    time.sleep(0.3)
+
+    # Confirma se o valor está certo, senão tenta de novo
+    for _ in range(2):
+        current = field.get_attribute("value").strip()
+        if current == str(value):
+            return
+        print(f"🔁 Tentando corrigir valor '{current}' para '{value}'")
+        driver.execute_script("arguments[0].value = '';", field)
+        time.sleep(0.2)
+        field.send_keys(str(value))
+        time.sleep(0.2)
+
+    final = field.get_attribute("value").strip()
+    if final != str(value):
+        print(f"⚠️ Valor final no campo ainda é '{final}', esperado: '{value}'")
 
 def scroll_into_view(driver, element):
     """Scroll the element into view."""
